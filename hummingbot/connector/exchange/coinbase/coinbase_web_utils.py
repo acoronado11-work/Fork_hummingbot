@@ -1,7 +1,7 @@
 import re
 from typing import Callable, Dict, NamedTuple, Optional, Tuple
 
-import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_constants as constants
+import hummingbot.connector.exchange.coinbase.coinbase_constants as constants
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.connector.utils import TimeSynchronizerRESTPreProcessor
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
@@ -27,7 +27,7 @@ def private_rest_url(path_url: str, domain: str = constants.DEFAULT_DOMAIN) -> s
     """
     Creates a full URL for provided private REST endpoint
     :param path_url: a private REST endpoint
-    :param domain: the coinbase_advanced_trade domain to connect to ("com" or "us"). The default value is "com"
+    :param domain: the coinbase domain to connect to ("com" or "us"). The default value is "com"
     :return: the full URL to the endpoint
     """
     if any((path_url.startswith(p) for p in constants.SIGNIN_ENDPOINTS)):
@@ -40,7 +40,7 @@ def endpoint_from_url(path_url: str, domain: str = constants.DEFAULT_DOMAIN) -> 
     """
     Recreates the endpoint from the url
     :param path_url: URL to the endpoint
-    :param domain: the coinbase_advanced_trade domain to connect to ("com" or "us"). The default value is "com"
+    :param domain: the coinbase domain to connect to ("com" or "us"). The default value is "com"
     :return: the full URL to the endpoint
     """
     if domain not in path_url:
@@ -93,7 +93,7 @@ async def get_current_server_time_s(
     """
     Get the current server time in seconds
     :param throttler: the throttler to use for the request
-    :param domain: the coinbase_advanced_trade domain to connect to ("com" or "us"). The default value is "com"
+    :param domain: the coinbase domain to connect to ("com" or "us"). The default value is "com"
     :return: the current server time in seconds
     """
     """
@@ -166,7 +166,7 @@ def symbol_to_pair(symbol: str) -> str:
     return symbol
 
 
-class CoinbaseAdvancedTradeWSSMessage(NamedTuple):
+class CoinbaseWSSMessage(NamedTuple):
     """
     Coinbase Advanced Trade Websocket API message
     https://docs.cloud.coinbase.com/advanced-trade-api/docs/ws-channels
@@ -190,7 +190,7 @@ class CoinbaseAdvancedTradeWSSMessage(NamedTuple):
     events: Tuple
 
 
-class CoinbaseAdvancedTradeServerIssueException(Exception):
+class CoinbaseServerIssueException(Exception):
     """
     Exception raised when the Coinbase Advanced Trade server returns an error
     """

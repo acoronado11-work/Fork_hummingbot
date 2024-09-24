@@ -13,7 +13,7 @@ LATEST_UPDATE = "2024-FEB-22"
 # curl https://docs.cloud.coinbase.com/advanced-trade-api/docs/changelog | md5sum
 CHANGELOG_HASH = "4825e9a0e67b58f6be38f7e411637b87"
 
-COINBASE_ADVANCED_TRADE_CLASS_PREFIX = "CoinbaseAdvancedTrade"
+COINBASE_ADVANCED_TRADE_CLASS_PREFIX = "Coinbase"
 
 DEFAULT_DOMAIN = "com"
 
@@ -98,7 +98,7 @@ WS_USER_SUBSCRIPTION_CHANNELS: bidict[str, str] = bidict({k: k for k in WS_USER_
 WS_OTHERS_SUBSCRIPTION_KEYS: Tuple[str, ...] = ("ticker", "ticker_batch", "status", "candles")
 WS_OTHERS_SUBSCRIPTION_CHANNELS: bidict[str, str] = bidict({k: k for k in WS_OTHERS_SUBSCRIPTION_KEYS})
 
-# CoinbaseAdvancedTrade params
+# Coinbase params
 SIDE_BUY = "BUY"
 SIDE_SELL = "SELL"
 

@@ -7,21 +7,21 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable, Dict, Iter
 from async_timeout import timeout
 from bidict import bidict
 
-import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_constants as constants
-import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_web_utils as web_utils
+import hummingbot.connector.exchange.coinbase.coinbase_constants as constants
+import hummingbot.connector.exchange.coinbase.coinbase_web_utils as web_utils
 from hummingbot.connector.constants import s_decimal_NaN
-from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_api_order_book_data_source import (
-    CoinbaseAdvancedTradeAPIOrderBookDataSource,
+from hummingbot.connector.exchange.coinbase.coinbase_api_order_book_data_source import (
+    CoinbaseAPIOrderBookDataSource,
 )
-from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_api_user_stream_data_source import (
-    CoinbaseAdvancedTradeAPIUserStreamDataSource,
-    CoinbaseAdvancedTradeCumulativeUpdate,
+from hummingbot.connector.exchange.coinbase.coinbase_api_user_stream_data_source import (
+    CoinbaseAPIUserStreamDataSource,
+    CoinbaseCumulativeUpdate,
 )
-from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_auth import CoinbaseAdvancedTradeAuth
-from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_order_book import (
-    CoinbaseAdvancedTradeOrderBook,
+from hummingbot.connector.exchange.coinbase.coinbase_auth import CoinbaseAuth
+from hummingbot.connector.exchange.coinbase.coinbase_order_book import (
+    CoinbaseOrderBook,
 )
-from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_web_utils import (
+from hummingbot.connector.exchange.coinbase.coinbase_web_utils import (
     get_timestamp_from_exchange_time,
     set_exchange_time_from_timestamp,
 )
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from hummingbot.client.config.config_helpers import ClientConfigAdapter
 
 
-class CoinbaseAdvancedTradeExchange(ExchangePyBase):
+class CoinbaseExchange(ExchangePyBase):
     UPDATE_ORDER_STATUS_MIN_INTERVAL = 2.5
 
     web_utils = web_utils
@@ -62,18 +62,18 @@ class CoinbaseAdvancedTradeExchange(ExchangePyBase):
 
     def __init__(self,
                  client_config_map: "ClientConfigAdapter",
-                 coinbase_advanced_trade_api_key: str,
-                 coinbase_advanced_trade_api_secret: str,
+                 coinbase_api_key: str,
+                 coinbase_api_secret: str,
                  trading_pairs: List[str] | None = None,
                  trading_required: bool = True,
                  domain: str = constants.DEFAULT_DOMAIN,
                  ):
-        self._api_key = coinbase_advanced_trade_api_key
-        self.secret_key = coinbase_advanced_trade_api_secret
+        self._api_key = coinbase_api_key
+        self.secret_key = coinbase_api_secret
         self._domain = domain
         self._trading_required = trading_required
         self._trading_pairs = trading_pairs
-        self._last_trades_poll_coinbase_advanced_trade_timestamp = -1
+        self._last_trades_poll_coinbase_timestamp = -1
         super().__init__(client_config_map)
 
         self._asset_uuid_map: Dict[str, str] = {}
@@ -87,7 +87,7 @@ class CoinbaseAdvancedTradeExchange(ExchangePyBase):
 
     def __repr__(self) -> str:
         rep: str = (
-            f"CoinbaseAdvancedTradeExchange({self._domain})\n"
+            f"CoinbaseExchange({self._domain})\n"
             f"  - trading_pairs: {self._trading_pairs}\n"
             f"  - trading_required: {self._trading_required}\n"
             f"  - asset_uuid_map: {self._asset_uuid_map}\n"
@@ -105,7 +105,7 @@ class CoinbaseAdvancedTradeExchange(ExchangePyBase):
         return self._asset_uuid_map
 
     @staticmethod
-    def coinbase_advanced_trade_order_type(order_type: OrderType) -> str:
+    def coinbase_order_type(order_type: OrderType) -> str:
         if order_type is OrderType.LIMIT_MAKER:
             return "LIMIT_MAKER"
         if order_type is OrderType.LIMIT:
@@ -114,12 +114,12 @@ class CoinbaseAdvancedTradeExchange(ExchangePyBase):
             return "MARKET"
 
     @staticmethod
-    def to_hb_order_type(coinbase_advanced_trade_type: str) -> OrderType:
-        return OrderType[coinbase_advanced_trade_type]
+    def to_hb_order_type(coinbase_type: str) -> OrderType:
+        return OrderType[coinbase_type]
 
     @property
     def authenticator(self):
-        return CoinbaseAdvancedTradeAuth(
+        return CoinbaseAuth(
             api_key=self._api_key,
             secret_key=self.secret_key,
             time_provider=self._time_synchronizer)
@@ -127,9 +127,9 @@ class CoinbaseAdvancedTradeExchange(ExchangePyBase):
     @property
     def name(self) -> str:
         if self._domain == "com":
-            return "coinbase_advanced_trade"
+            return "coinbase"
         else:
-            return f"coinbase_advanced_trade_{self._domain}"
+            return f"coinbase_{self._domain}"
 
     @property
     def rate_limits_rules(self):
@@ -258,14 +258,14 @@ class CoinbaseAdvancedTradeExchange(ExchangePyBase):
             auth=self._auth)
 
     def _create_order_book_data_source(self) -> OrderBookTrackerDataSource:
-        return CoinbaseAdvancedTradeAPIOrderBookDataSource(
+        return CoinbaseAPIOrderBookDataSource(
             trading_pairs=self._trading_pairs,
             connector=self,
             domain=self.domain,
             api_factory=self._web_assistants_factory)
 
     def _create_user_stream_data_source(self) -> UserStreamTrackerDataSource:
-        return CoinbaseAdvancedTradeAPIUserStreamDataSource(
+        return CoinbaseAPIUserStreamDataSource(
             auth=self._auth,
             trading_pairs=self._trading_pairs,
             connector=self,
@@ -318,7 +318,7 @@ class CoinbaseAdvancedTradeExchange(ExchangePyBase):
         """
         amount_str: str = f"{amount:f}"
         price_str: str = f"{price:f}"
-        type_str: str = CoinbaseAdvancedTradeExchange.coinbase_advanced_trade_order_type(order_type)
+        type_str: str = CoinbaseExchange.coinbase_order_type(order_type)
         side_str: str = constants.SIDE_BUY if trade_type is TradeType.BUY else constants.SIDE_SELL
         symbol: str = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
 
@@ -592,7 +592,7 @@ class CoinbaseAdvancedTradeExchange(ExchangePyBase):
 
         snapshot_timestamp: float = self.time_synchronizer.time()
 
-        snapshot_msg: OrderBookMessage = CoinbaseAdvancedTradeOrderBook.snapshot_message_from_exchange(
+        snapshot_msg: OrderBookMessage = CoinbaseOrderBook.snapshot_message_from_exchange(
             snapshot,
             snapshot_timestamp,
             metadata={"trading_pair": trading_pair}
@@ -835,7 +835,7 @@ class CoinbaseAdvancedTradeExchange(ExchangePyBase):
                                                    is_auth_required=True)
         self._trading_fees = fees
 
-    async def _iter_user_event_queue(self) -> AsyncIterable[CoinbaseAdvancedTradeCumulativeUpdate]:
+    async def _iter_user_event_queue(self) -> AsyncIterable[CoinbaseCumulativeUpdate]:
         """
         Called by _user_stream_event_listener.
         """
@@ -935,8 +935,8 @@ class CoinbaseAdvancedTradeExchange(ExchangePyBase):
 
         if is_execution_time():
             self.logger().debug(f" '-> Fill request at: {self.time_synchronizer.time()}")
-            query_time = set_exchange_time_from_timestamp(self._last_trades_poll_coinbase_advanced_trade_timestamp, "s")
-            self._last_trades_poll_coinbase_advanced_trade_timestamp = self.time_synchronizer.time()
+            query_time = set_exchange_time_from_timestamp(self._last_trades_poll_coinbase_timestamp, "s")
+            self._last_trades_poll_coinbase_timestamp = self.time_synchronizer.time()
 
             order_by_exchange_id_map = {
                 order.exchange_order_id: order

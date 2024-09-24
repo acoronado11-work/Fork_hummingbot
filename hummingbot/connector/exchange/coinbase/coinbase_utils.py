@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from pydantic import Field, SecretStr
 
-import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_constants as constants
+import hummingbot.connector.exchange.coinbase.coinbase_constants as constants
 from hummingbot.client.config.config_data_types import BaseConnectorConfigMap, ClientFieldData
 from hummingbot.core.data_type.trade_fee import TradeFeeSchema
 from hummingbot.core.web_assistant.connections.data_types import EndpointRESTRequest
@@ -20,7 +20,7 @@ DEFAULT_FEES = TradeFeeSchema(
 
 
 @dataclass
-class CoinbaseAdvancedTradeRESTRequest(EndpointRESTRequest):
+class CoinbaseRESTRequest(EndpointRESTRequest):
     def __post_init__(self):
         super().__post_init__()
         self._ensure_endpoint_for_auth()
@@ -34,9 +34,9 @@ class CoinbaseAdvancedTradeRESTRequest(EndpointRESTRequest):
             raise ValueError("The endpoint must be specified if authentication is required.")
 
 
-class CoinbaseAdvancedTradeConfigMap(BaseConnectorConfigMap):
-    connector: str = Field(default="coinbase_advanced_trade", const=True, client_data=None)
-    coinbase_advanced_trade_api_key: SecretStr = Field(
+class CoinbaseConfigMap(BaseConnectorConfigMap):
+    connector: str = Field(default="coinbase", const=True, client_data=None)
+    coinbase_api_key: SecretStr = Field(
         default=...,
         client_data=ClientFieldData(
             prompt=lambda cm: "Enter your Coinbase Advanced Trade API key",
@@ -45,7 +45,7 @@ class CoinbaseAdvancedTradeConfigMap(BaseConnectorConfigMap):
             prompt_on_new=True,
         )
     )
-    coinbase_advanced_trade_api_secret: SecretStr = Field(
+    coinbase_api_secret: SecretStr = Field(
         default=...,
         client_data=ClientFieldData(
             prompt=lambda cm: "Enter your Coinbase Advanced Trade API secret",
@@ -56,7 +56,7 @@ class CoinbaseAdvancedTradeConfigMap(BaseConnectorConfigMap):
     )
 
     class Config:
-        title = "coinbase_advanced_trade"
+        title = "coinbase"
 
 
-KEYS = CoinbaseAdvancedTradeConfigMap.construct()
+KEYS = CoinbaseConfigMap.construct()

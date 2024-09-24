@@ -3,8 +3,8 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_constants as constants
-import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_web_utils as web_utils
+import hummingbot.connector.exchange.coinbase.coinbase_constants as constants
+import hummingbot.connector.exchange.coinbase.coinbase_web_utils as web_utils
 from hummingbot.core.data_type.order_book_message import OrderBookMessage
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod, WSJSONRequest
@@ -13,14 +13,14 @@ from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
 
 if TYPE_CHECKING:
-    from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_exchange import CoinbaseAdvancedTradeExchange
+    from hummingbot.connector.exchange.coinbase.coinbase_exchange import CoinbaseExchange
 
-from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_order_book import (
-    CoinbaseAdvancedTradeOrderBook,
+from hummingbot.connector.exchange.coinbase.coinbase_order_book import (
+    CoinbaseOrderBook,
 )
 
 
-class CoinbaseAdvancedTradeAPIOrderBookDataSource(OrderBookTrackerDataSource):
+class CoinbaseAPIOrderBookDataSource(OrderBookTrackerDataSource):
     HEARTBEAT_TIME_INTERVAL = 30.0
     TRADE_STREAM_ID = 1
     DIFF_STREAM_ID = 2
@@ -37,21 +37,21 @@ class CoinbaseAdvancedTradeAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     def __init__(self,
                  trading_pairs: List[str],
-                 connector: 'CoinbaseAdvancedTradeExchange',
+                 connector: 'CoinbaseExchange',
                  api_factory: WebAssistantsFactory,
                  domain: str = constants.DEFAULT_DOMAIN):
         """
-        Initialize the CoinbaseAdvancedTradeAPIUserStreamDataSource.
+        Initialize the CoinbaseAPIUserStreamDataSource.
 
         :param trading_pairs: The list of trading pairs to subscribe to.
-        :param connector: The CoinbaseAdvancedTradeExchangePairProtocol implementation.
+        :param connector: The CoinbaseExchangePairProtocol implementation.
         :param api_factory: The WebAssistantsFactory instance for creating the WSAssistant.
         :param domain: The domain for the WebSocket connection.
         """
         super().__init__(trading_pairs)
         self._domain: str = domain
         self._api_factory: WebAssistantsFactory = api_factory
-        self._connector: 'CoinbaseAdvancedTradeExchange' = connector
+        self._connector: 'CoinbaseExchange' = connector
 
         self._subscription_lock: Optional[asyncio.Lock] = None
         self._ws_assistant: Optional[WSAssistant] = None
@@ -63,7 +63,7 @@ class CoinbaseAdvancedTradeAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._snapshot_messages_queue_key = "unused_snapshot_queue"
 
     async def _parse_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        order_book_message: OrderBookMessage = await CoinbaseAdvancedTradeOrderBook.level2_or_trade_message_from_exchange(
+        order_book_message: OrderBookMessage = await CoinbaseOrderBook.level2_or_trade_message_from_exchange(
             raw_message,
             self._connector.exchange_symbol_associated_to_pair)
         await message_queue.put(order_book_message)
@@ -216,7 +216,7 @@ class CoinbaseAdvancedTradeAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
         snapshot_timestamp: float = self._connector.time_synchronizer.time()
 
-        snapshot_msg: OrderBookMessage = CoinbaseAdvancedTradeOrderBook.snapshot_message_from_exchange(
+        snapshot_msg: OrderBookMessage = CoinbaseOrderBook.snapshot_message_from_exchange(
             snapshot,
             snapshot_timestamp,
             metadata={"trading_pair": trading_pair}

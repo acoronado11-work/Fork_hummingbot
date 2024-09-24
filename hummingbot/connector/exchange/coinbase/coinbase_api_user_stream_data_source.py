@@ -3,8 +3,8 @@ import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, NamedTuple
 
-import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_constants as constants
-from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_web_utils import (
+import hummingbot.connector.exchange.coinbase.coinbase_constants as constants
+from hummingbot.connector.exchange.coinbase.coinbase_web_utils import (
     get_timestamp_from_exchange_time,
 )
 from hummingbot.core.data_type.common import OrderType, TradeType
@@ -15,12 +15,12 @@ from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
 
 if TYPE_CHECKING:
-    from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_exchange import (  # noqa: F401
-        CoinbaseAdvancedTradeExchange,
+    from hummingbot.connector.exchange.coinbase.coinbase_exchange import (  # noqa: F401
+        CoinbaseExchange,
     )
 
 
-class CoinbaseAdvancedTradeCumulativeUpdate(NamedTuple):
+class CoinbaseCumulativeUpdate(NamedTuple):
     client_order_id: str
     exchange_order_id: str
     status: str
@@ -38,7 +38,7 @@ class CoinbaseAdvancedTradeCumulativeUpdate(NamedTuple):
     is_taker: bool = False
 
 
-class CoinbaseAdvancedTradeAPIUserStreamDataSource(UserStreamTrackerDataSource):
+class CoinbaseAPIUserStreamDataSource(UserStreamTrackerDataSource):
     """
     UserStreamTrackerDataSource implementation for Coinbase Advanced Trade API.
     """
@@ -55,15 +55,15 @@ class CoinbaseAdvancedTradeAPIUserStreamDataSource(UserStreamTrackerDataSource):
     def __init__(self,
                  auth,
                  trading_pairs: List[str],
-                 connector: 'CoinbaseAdvancedTradeExchange',
+                 connector: 'CoinbaseExchange',
                  api_factory: WebAssistantsFactory,
                  domain: str = "com"):
         """
-        Initialize the CoinbaseAdvancedTradeAPIUserStreamDataSource.
+        Initialize the CoinbaseAPIUserStreamDataSource.
 
-        :param auth: The CoinbaseAdvancedTradeAuth instance for authentication.
+        :param auth: The CoinbaseAuth instance for authentication.
         :param trading_pairs: The list of trading pairs to subscribe to.
-        :param connector: The CoinbaseAdvancedTradeExchangePairProtocol implementation.
+        :param connector: The CoinbaseExchangePairProtocol implementation.
         :param api_factory: The WebAssistantsFactory instance for creating the WSAssistant.
         :param domain: The domain for the WebSocket connection.
         """
@@ -122,7 +122,7 @@ class CoinbaseAdvancedTradeAPIUserStreamDataSource(UserStreamTrackerDataSource):
     ) -> None:
         """
         Applies the WebsocketAction in argument to the list of channels/pairs through the provided websocket connection.
-        :param action: WebsocketAction defined in the CoinbaseAdvancedTradeConstants.
+        :param action: WebsocketAction defined in the CoinbaseConstants.
         :param websocket_assistant: the websocket assistant used to connect to the exchange
         """
         """
@@ -297,7 +297,7 @@ class CoinbaseAdvancedTradeAPIUserStreamDataSource(UserStreamTrackerDataSource):
                         elif order["order_type"] == "Market":
                             order_type = OrderType.MARKET
 
-                        cumulative_order: CoinbaseAdvancedTradeCumulativeUpdate = CoinbaseAdvancedTradeCumulativeUpdate(
+                        cumulative_order: CoinbaseCumulativeUpdate = CoinbaseCumulativeUpdate(
                             exchange_order_id=order["order_id"],
                             client_order_id=order["client_order_id"],
                             status=order["status"],
