@@ -12,16 +12,16 @@ from coinbase import jwt_generator
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
-from hummingbot.connector.exchange.coinbase_exchange.coinbase_exchange_web_utils import endpoint_from_url
+from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_web_utils import endpoint_from_url
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.connections.data_types import RESTRequest, WSJSONRequest, WSRequest
 from hummingbot.logger import HummingbotLogger
 
 
-class CoinbaseExchangeAuth(AuthBase):
+class CoinbaseAdvancedTradeAuth(AuthBase):
     """
-    Authentication class for Coinbase Exchange API.
+    Authentication class for Coinbase Advanced Trade API.
 
     Uses HMAC SHA256 to authenticate REST and websocket requests.
 
@@ -56,7 +56,7 @@ class CoinbaseExchangeAuth(AuthBase):
 
     async def rest_authenticate(self, request: RESTRequest) -> RESTRequest:
         """
-        This method configures a REST request to be authenticated.
+        This method is intended to configure a REST request to be authenticated.
         :param request: the request to be configured for authenticated interaction
         """
         try:
@@ -67,8 +67,22 @@ class CoinbaseExchangeAuth(AuthBase):
 
     async def rest_legacy_authenticate(self, request: RESTRequest) -> RESTRequest:
         """
-        Adds the server time and the signature to the request for authenticated interactions. It also adds
+        Adds the server time and the signature to the request, required for authenticated interactions. It also adds
         the required parameter in the request header.
+
+        All REST requests must contain the following headers:
+
+        CB-ACCESS-KEY API key as a string
+        CB-ACCESS-SIGN Message signature (see below)
+        CB-ACCESS-TIMESTAMP Timestamp for your request
+        All request bodies should have content type application/json and be valid JSON.
+
+        Example request:
+
+        curl https://api.coinbase.com/v2/user \
+          --header "CB-ACCESS-KEY: <your api key>" \
+          --header "CB-ACCESS-SIGN: <the user generated message signature>" \
+          --header "CB-ACCESS-TIMESTAMP: <a timestamp for your request>"
 
         :param request: the request to be configured for authenticated interaction
         :returns: the authenticated request
@@ -92,7 +106,12 @@ class CoinbaseExchangeAuth(AuthBase):
 
     async def rest_jwt_authenticate(self, request: RESTRequest) -> RESTRequest:
         """
-        Adds the JWT header to the REST request.
+        Adds the JWT header to the rest request.
+
+        All JWT REST requests must contain the JWT Authorization in headers:
+
+        Example request:
+        curl https://api.coinbase.com/v2/user --header "Authorization: Bearer $JWT"
 
         :param request: the request to be configured for authenticated interaction
         :returns: the authenticated request
@@ -116,9 +135,10 @@ class CoinbaseExchangeAuth(AuthBase):
 
     async def ws_authenticate(self, request: WSJSONRequest) -> WSRequest:
         """
-        Configures a WebSocket request to be authenticated.
+        This method is intended to configure a websocket request to be authenticated.
         :param request: the request to be configured for authenticated interaction
         """
+
         try:
             return await self.ws_jwt_authenticate(request)
         except ValueError:
@@ -127,9 +147,26 @@ class CoinbaseExchangeAuth(AuthBase):
 
     async def ws_legacy_authenticate(self, request: WSJSONRequest) -> WSRequest:
         """
-        Configures a WebSocket request to be authenticated using legacy method.
-
+        This method is intended to configure a websocket request to be authenticated.
         :param request: the request to be configured for authenticated interaction
+        https://docs.cloud.coinbase.com/advanced-trade-api/docs/ws-overview
+        {
+            "type": "subscribe",
+            "product_ids": [
+                "ETH-USD",
+                "ETH-EUR"
+            ],
+            "channel": "level2",
+            "api_key": "exampleApiKey123",
+            "timestamp": 1660838876,
+            "signature": "00000000000000000000000000",
+        }
+        To subscribe to any channel, users must provide a channel name, api_key, timestamp, and signature:
+            channel name as a string. You can only subscribe to one channel at a time.
+            timestamp should be a string in UNIX format. Example: "1677527973".
+            signature should be created by:
+        Concatenating and comma-separating the timestamp, channel name, and product Ids, for example: 1660838876level2ETH-USD,ETH-EUR.
+        Signing the above message with the passphrase and base64-encoding the signature.
         """
         timestamp: str = str(int(self.time_provider.time()))
 
@@ -149,8 +186,25 @@ class CoinbaseExchangeAuth(AuthBase):
 
     async def ws_jwt_authenticate(self, request: WSJSONRequest) -> WSRequest:
         """
-        Configures a WebSocket request to be authenticated using JWT.
+        This method is intended to configure a websocket request to be authenticated.
         :param request: the request to be configured for authenticated interaction
+        https://docs.cloud.coinbase.com/advanced-trade-api/docs/ws-overview
+        {
+            "type": "subscribe",
+            "product_ids": [
+                "ETH-USD",
+                "ETH-EUR"
+            ],
+            "channel": "level2",
+            "jwt": "exampleJWT",
+        }
+        To subscribe to any channel, users must provide a channel name, api_key, timestamp, and signature:
+            channel name as a string. You can only subscribe to one channel at a time.
+            timestamp should be a string in UNIX format. Example: "1677527973".
+            signature should be created by:
+        Concatenating and comma-separating the timestamp, channel name, and product Ids,f
+        for example: 1660838876level2ETH-USD,ETH-EUR.
+        Signing the above message with the passphrase and base64-encoding the signature.
         """
         try:
             payload: Dict = dict(request.payload or {}) | {
@@ -176,11 +230,7 @@ class CoinbaseExchangeAuth(AuthBase):
 
     def _build_jwt(self, service, uri=None) -> str:
         """
-        This builds a JWT token for authentication using the provided service and optional URI.
-
-        :param service: the service for which to create the JWT token
-        :param uri: the optional URI to include in the token
-        :returns: the JWT token
+        This is extracted from Coinbase SDK because it relies upon 'time' rather than the eim synchronizer
         """
         try:
             private_key_bytes = self._secret_key_pem().encode("utf-8")
@@ -188,7 +238,8 @@ class CoinbaseExchangeAuth(AuthBase):
                 private_key_bytes, password=None
             )
         except ValueError as e:
-            self.logger().debug("The API key is not in PEM format. Falling back to legacy authentication.")
+            # This handles errors like incorrect key format
+            self.logger().debug("The API key is not PEM format. Falling back to Legacy sign-in.")
             raise e
 
         time_: int = int(self.time_provider.time())
@@ -216,12 +267,15 @@ class CoinbaseExchangeAuth(AuthBase):
     def _secret_key_pem(self) -> str:
         """
         Converts the secret key to PEM format.
-        Handles keys in PEM format, single-line PEM, and base64-encoded keys.
+        Comprehends keys in PEM format, single-line PEM and base64-encoded keys.
         """
+        # Remove any leading or trailing whitespace and replace \\n with \n
         private_key_base64 = self.secret_key.strip().replace("\\n", "\n")
 
+        # If the key is already in PEM format with \n, return it
         if private_key_base64.startswith("-----") and "\n" in private_key_base64:
             try:
+                # Try to load the key to validate its structure
                 serialization.load_pem_private_key(
                     private_key_base64.encode(),
                     password=None,
@@ -231,13 +285,16 @@ class CoinbaseExchangeAuth(AuthBase):
                 raise ValueError("The secret key is not a valid PEM key.")
             return private_key_base64
 
+        # Remove the BEGIN and END lines
         private_key_base64 = private_key_base64.replace("-----BEGIN EC PRIVATE" + " KEY-----", "").replace("-----END EC PRIVATE" + " KEY-----", "").strip()
 
+        # Verify that the key is a correct base64 string
         try:
             binascii.a2b_base64(private_key_base64)
         except binascii.Error:
             raise ValueError("The secret key is not a valid base64 string.")
 
+        # Wrap the base64-encoded key into lines of 64 characters
         wrapped_key = textwrap.wrap(private_key_base64, width=64)
 
         private_key_base64 = (
@@ -247,6 +304,7 @@ class CoinbaseExchangeAuth(AuthBase):
         )
 
         try:
+            # Try to load the key to validate its structure
             serialization.load_pem_private_key(
                 private_key_base64.encode(),
                 password=None,

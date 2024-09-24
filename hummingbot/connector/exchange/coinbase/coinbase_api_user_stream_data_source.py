@@ -3,7 +3,8 @@ import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, NamedTuple
 
-from hummingbot.connector.exchange.coinbase_exchange.coinbase_exchange_web_utils import (
+import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_constants as constants
+from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_web_utils import (
     get_timestamp_from_exchange_time,
 )
 from hummingbot.core.data_type.common import OrderType, TradeType
@@ -14,12 +15,12 @@ from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
 
 if TYPE_CHECKING:
-    from hummingbot.connector.exchange.coinbase_exchange.coinbase_exchange import (  # noqa: F401
-        CoinbaseExchange,
+    from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_exchange import (  # noqa: F401
+        CoinbaseAdvancedTradeExchange,
     )
 
 
-class CoinbaseExchangeCumulativeUpdate(NamedTuple):
+class CoinbaseAdvancedTradeCumulativeUpdate(NamedTuple):
     client_order_id: str
     exchange_order_id: str
     status: str
@@ -29,15 +30,17 @@ class CoinbaseExchangeCumulativeUpdate(NamedTuple):
     cumulative_base_amount: Decimal
     remainder_base_amount: Decimal
     cumulative_fee: Decimal
+    # Needed for tracking existing orders on the exchange
     order_type: OrderType
     trade_type: TradeType
     creation_timestamp_s: float = 0.0  # seconds
-    is_taker: bool = False  # Coinbase delivers trade events from the maker's perspective
+    # Coinbase Advanced Trade delivers trade events from the maker's perspective
+    is_taker: bool = False
 
 
-class CoinbaseExchangeAPIUserStreamDataSource(UserStreamTrackerDataSource):
+class CoinbaseAdvancedTradeAPIUserStreamDataSource(UserStreamTrackerDataSource):
     """
-    UserStreamTrackerDataSource implementation for Coinbase Exchange API.
+    UserStreamTrackerDataSource implementation for Coinbase Advanced Trade API.
     """
     _sequence: int = 0
     _logger: HummingbotLogger | logging.Logger | None = None
@@ -52,15 +55,15 @@ class CoinbaseExchangeAPIUserStreamDataSource(UserStreamTrackerDataSource):
     def __init__(self,
                  auth,
                  trading_pairs: List[str],
-                 connector: 'CoinbaseExchange',
+                 connector: 'CoinbaseAdvancedTradeExchange',
                  api_factory: WebAssistantsFactory,
                  domain: str = "com"):
         """
-        Initialize the CoinbaseExchangeAPIUserStreamDataSource.
+        Initialize the CoinbaseAdvancedTradeAPIUserStreamDataSource.
 
-        :param auth: The CoinbaseExchangeAuth instance for authentication.
+        :param auth: The CoinbaseAdvancedTradeAuth instance for authentication.
         :param trading_pairs: The list of trading pairs to subscribe to.
-        :param connector: The CoinbaseExchange instance.
+        :param connector: The CoinbaseAdvancedTradeExchangePairProtocol implementation.
         :param api_factory: The WebAssistantsFactory instance for creating the WSAssistant.
         :param domain: The domain for the WebSocket connection.
         """
@@ -69,21 +72,22 @@ class CoinbaseExchangeAPIUserStreamDataSource(UserStreamTrackerDataSource):
         self._api_factory: WebAssistantsFactory = api_factory
         self._trading_pairs: List[str] = trading_pairs
         self._connector = connector
+
         self._ws_assistant: WSAssistant | None = None
         self._reset_recv_time: bool = False
 
     @property
     def last_recv_time(self) -> float:
         """
-        Returns the time of the last received message.
+        Returns the time of the last received message
 
-        :return: the timestamp of the last received message in seconds.
+        :return: the timestamp of the last received message in seconds
         """
         if self._ws_assistant and not self._reset_recv_time:
             return self._ws_assistant.last_recv_time
         return 0
 
-    async def _connected_websocket_assistant(self) -> WSAssistant:
+    async def _connected_websocket_assistant(self, pair=None) -> WSAssistant:
         """
         Create and connect the WebSocket assistant.
 
@@ -92,51 +96,75 @@ class CoinbaseExchangeAPIUserStreamDataSource(UserStreamTrackerDataSource):
         self._ws_assistant = await self._api_factory.get_ws_assistant()
 
         await self._ws_assistant.connect(
-            ws_url="wss://ws-feed.exchange.coinbase.com",
-            ping_timeout=30.0
+            ws_url=constants.WSS_URL.format(domain=self._domain),
+            ping_timeout=constants.WS_HEARTBEAT_TIME_INTERVAL
         )
         return self._ws_assistant
 
     async def _subscribe_channels(self, websocket_assistant: WSAssistant) -> None:
         """
         Subscribes to the user events through the provided websocket connection.
-        :param websocket_assistant: the websocket assistant used to connect to the exchange.
+        :param websocket_assistant: the websocket assistant used to connect to the exchange
         """
-        await self._subscribe_or_unsubscribe(websocket_assistant, "subscribe")
+        await self._subscribe_or_unsubscribe(websocket_assistant, constants.WebsocketAction.SUBSCRIBE)
 
     async def _unsubscribe_channels(self, websocket_assistant: WSAssistant) -> None:
         """
-        Unsubscribes from the user events through the provided websocket connection.
-        :param websocket_assistant: the websocket assistant used to connect to the exchange.
+        Unsubscribes to the user events through the provided websocket connection.
+        :param websocket_assistant: the websocket assistant used to connect to the exchange
         """
-        await self._subscribe_or_unsubscribe(websocket_assistant, "unsubscribe")
+        await self._subscribe_or_unsubscribe(websocket_assistant, constants.WebsocketAction.UNSUBSCRIBE)
 
     async def _subscribe_or_unsubscribe(
             self,
             websocket_assistant: WSAssistant,
-            action: str
+            action: constants.WebsocketAction
     ) -> None:
         """
-        Subscribes or unsubscribes to the list of channels/pairs through the provided websocket connection.
-        :param action: "subscribe" or "unsubscribe".
-        :param websocket_assistant: the websocket assistant used to connect to the exchange.
+        Applies the WebsocketAction in argument to the list of channels/pairs through the provided websocket connection.
+        :param action: WebsocketAction defined in the CoinbaseAdvancedTradeConstants.
+        :param websocket_assistant: the websocket assistant used to connect to the exchange
+        """
+        """
+        https://docs.cloud.coinbase.com/advanced-trade-api/docs/ws-best-practices
+
+        Recommended to use one subscription per channel
+        {
+            "type": "subscribe",  # or "unsubscribe"
+            "product_ids": [
+                "ETH-USD",
+                "BTC-USD"   # Possible but not preferred
+            ],
+            "channel": "user",
+
+            # Complemented by the WSAssistant
+            "signature": "XYZ",
+            "api_key": "XXX",
+            or
+            jwt: "JWT",
+            "timestamp": 1675974199
+        }
         """
         symbols: List[str] = [
             await self._connector.exchange_symbol_associated_to_pair(trading_pair=pair) for pair in self._trading_pairs
         ]
 
         try:
-            payload = {
-                "type": action,
-                "product_ids": symbols,
-                "channels": ["user"]
-            }
+            for channel in ["heartbeats", constants.WS_USER_SUBSCRIPTION_KEYS]:
+                payload = {
+                    "type": action.value,
+                    "product_ids": symbols,
+                    "channel": channel,
+                }
 
-            await websocket_assistant.send(WSJSONRequest(payload=payload, is_auth_required=True))
-            self.logger().info(f"{action.capitalize()}d to user channels for {self._trading_pairs}.")
+                # Change subscription to the channel and pair
+                await websocket_assistant.send(WSJSONRequest(payload=payload, is_auth_required=True))
+            self.logger().info(
+                f"{action.value.capitalize()}-ing to {constants.WS_USER_SUBSCRIPTION_KEYS} for {self._trading_pairs} ...")
         except (asyncio.CancelledError, Exception) as e:
             self.logger().exception(
-                f"Unexpected error occurred {action.capitalize()}ing to user channels for {self._trading_pairs}.\n"
+                f"Unexpected error occurred {action.value.capitalize()}-ing "
+                f"to {constants.WS_USER_SUBSCRIPTION_KEYS} for {self._trading_pairs}...\n"
                 f"Exception: {e}",
                 exc_info=True
             )
@@ -160,10 +188,10 @@ class CoinbaseExchangeAPIUserStreamDataSource(UserStreamTrackerDataSource):
     async def _process_websocket_messages(self, websocket_assistant: WSAssistant, queue: asyncio.Queue):
         """
         Processes the messages from the websocket connection and puts them into the intermediary queue.
-        :param websocket_assistant: the websocket assistant used to connect to the exchange.
+        :param websocket_assistant: the websocket assistant used to connect to the exchange
         :param queue: The intermediary queue to put the messages into.
         """
-        async for ws_response in websocket_assistant.iter_messages():  # type: ignore
+        async for ws_response in websocket_assistant.iter_messages():  # type: ignore # PyCharm doesn't recognize iter_messages
             data: Dict[str, Any] = ws_response.data
 
             if 'type' in data and data["type"] == "error":
@@ -172,22 +200,24 @@ class CoinbaseExchangeAPIUserStreamDataSource(UserStreamTrackerDataSource):
                     await self._subscribe_channels(self._ws_assistant)
                 else:
                     self.logger().error(f"Received error message: {data}")
+                # Reset last received time
                 self._reset_recv_time = True
                 return
 
             self._process_sequence_number(data)
 
-            channel: str = data.get("channel", "")
+            channel: str = data["channel"]
             if channel == 'user':
                 async for order in self._decipher_message(event_message=data):
                     try:
+                        # queue.put_nowait(order)
                         await self._try_except_queue_put(item=order, queue=queue)
                     except asyncio.QueueFull:
                         self.logger().exception("Timeout while waiting to put message into raw queue. Message dropped.")
                         raise
             elif channel == 'subscriptions':
                 self._process_subscription_message(data)
-            elif channel == 'heartbeat':
+            elif channel in {"heartbeats"}:
                 self._process_heartbeat_message(data)
 
     def _process_sequence_number(self, data: Dict[str, Any]):
@@ -195,48 +225,79 @@ class CoinbaseExchangeAPIUserStreamDataSource(UserStreamTrackerDataSource):
         Processes the sequence number from the websocket message.
         :param data: The message received from the websocket connection.
         """
-        if "sequence" in data and data["sequence"] > self._sequence:
+        if "sequence_num" in data and data["sequence_num"] > self._sequence:
             self.logger().warning(
                 f"Received a message with a higher sequence number than the current one. "
-                f"Current sequence: {self._sequence}, received sequence: {data['sequence']}."
+                f"Current sequence: {self._sequence}, received sequence: {data['sequence_num']}."
             )
 
-        self._sequence = data["sequence"] + 1
+        self._sequence = data["sequence_num"] + 1
 
     def _process_subscription_message(self, data: Dict[str, Any]):
         """
         Processes the subscription message from the websocket connection.
         :param data: The message received from the websocket connection.
         """
-        pass
+        pass  # self.logger().debug(f"Received subscription message: {data}")
 
     def _process_heartbeat_message(self, data: Dict[str, Any]):
         """
         Processes the heartbeat message from the websocket connection.
         :param data: The message received from the websocket connection.
         """
-        pass
+        pass  # self.logger().debug(f"Received heartbeat message: {data}")
 
     async def _decipher_message(self, event_message: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Streamlines the messages for processing by the exchange.
+        Streamline the messages for processing by the exchange.
         :param event_message: The message received from the exchange.
         """
+        """
+        https://docs.cloud.coinbase.com/advanced-trade-api/docs/ws-channels#user-channel
+        {
+          "channel": "user",
+          "client_id": "",
+          "timestamp": "2023-02-09T20:33:57.609931463Z",
+          "sequence_num": 0,
+          "events": [
+            {
+              "type": "snapshot",
+              "orders": [
+                {
+                  "order_id": "XXX",
+                  "client_order_id": "YYY",
+                  "cumulative_quantity": "0",
+                  "leaves_quantity": "0.000994",
+                  "avg_price": "0",
+                  "total_fees": "0",
+                  "status": "OPEN",
+                  "product_id": "BTC-USD",
+                  "creation_time": "2022-12-07T19:42:18.719312Z",
+                  "order_side": "BUY",
+                  "order_type": "Limit"
+                },
+              ]
+            }
+          ]
+        }
+        """
+        # self.logger().debug(f" '-> _decipher_message: message: {event_message}")
+
         if not isinstance(event_message["timestamp"], float):
             event_message["timestamp"] = get_timestamp_from_exchange_time(event_message["timestamp"], "s")
 
         timestamp_s: float = event_message["timestamp"]
-        for event in event_message.get("events", []):
-            for order in event.get("orders", []):
+        for event in event_message.get("events"):
+            for order in event["orders"]:
                 try:
                     if order["client_order_id"] != '':
                         order_type: OrderType | None = None
-                        if order["order_type"] == "limit":
+                        if order["order_type"] == "Limit":
                             order_type = OrderType.LIMIT
-                        elif order["order_type"] == "market":
+                        elif order["order_type"] == "Market":
                             order_type = OrderType.MARKET
 
-                        cumulative_order: CoinbaseExchangeCumulativeUpdate = CoinbaseExchangeCumulativeUpdate(
+                        cumulative_order: CoinbaseAdvancedTradeCumulativeUpdate = CoinbaseAdvancedTradeCumulativeUpdate(
                             exchange_order_id=order["order_id"],
                             client_order_id=order["client_order_id"],
                             status=order["status"],
@@ -249,9 +310,10 @@ class CoinbaseExchangeAPIUserStreamDataSource(UserStreamTrackerDataSource):
                             remainder_base_amount=Decimal(order["leaves_quantity"]),
                             cumulative_fee=Decimal(order["total_fees"]),
                             order_type=order_type,
-                            trade_type=TradeType.BUY if order["order_side"] == "buy" else TradeType.SELL,
+                            trade_type=TradeType.BUY if order["order_side"] == "BUY" else TradeType.SELL,
                             creation_timestamp_s=get_timestamp_from_exchange_time(order["creation_time"], "s"),
                         )
+                        self.logger().debug(f"Yielding order: {cumulative_order}")
                         yield cumulative_order
 
                 except Exception as e:

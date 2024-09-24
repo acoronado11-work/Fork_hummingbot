@@ -3,6 +3,8 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_constants as constants
+import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_web_utils as web_utils
 from hummingbot.core.data_type.order_book_message import OrderBookMessage
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod, WSJSONRequest
@@ -11,14 +13,14 @@ from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
 
 if TYPE_CHECKING:
-    from hummingbot.connector.exchange.coinbase_exchange.coinbase_exchange import CoinbaseExchange
+    from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_exchange import CoinbaseAdvancedTradeExchange
 
-from hummingbot.connector.exchange.coinbase_exchange.coinbase_exchange_order_book import (
-    CoinbaseExchangeOrderBook,
+from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_order_book import (
+    CoinbaseAdvancedTradeOrderBook,
 )
 
 
-class CoinbaseExchangeAPIOrderBookDataSource(OrderBookTrackerDataSource):
+class CoinbaseAdvancedTradeAPIOrderBookDataSource(OrderBookTrackerDataSource):
     HEARTBEAT_TIME_INTERVAL = 30.0
     TRADE_STREAM_ID = 1
     DIFF_STREAM_ID = 2
@@ -35,33 +37,33 @@ class CoinbaseExchangeAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     def __init__(self,
                  trading_pairs: List[str],
-                 connector: 'CoinbaseExchange',
+                 connector: 'CoinbaseAdvancedTradeExchange',
                  api_factory: WebAssistantsFactory,
-                 domain: str = "exchange.coinbase.com"):
+                 domain: str = constants.DEFAULT_DOMAIN):
         """
-        Initialize the CoinbaseExchangeAPIOrderBookDataSource.
+        Initialize the CoinbaseAdvancedTradeAPIUserStreamDataSource.
 
         :param trading_pairs: The list of trading pairs to subscribe to.
-        :param connector: The CoinbaseExchange instance.
+        :param connector: The CoinbaseAdvancedTradeExchangePairProtocol implementation.
         :param api_factory: The WebAssistantsFactory instance for creating the WSAssistant.
         :param domain: The domain for the WebSocket connection.
         """
         super().__init__(trading_pairs)
         self._domain: str = domain
         self._api_factory: WebAssistantsFactory = api_factory
-        self._connector: 'CoinbaseExchange' = connector
+        self._connector: 'CoinbaseAdvancedTradeExchange' = connector
 
         self._subscription_lock: Optional[asyncio.Lock] = None
         self._ws_assistant: Optional[WSAssistant] = None
         self._last_traded_prices: Dict[str, float] = defaultdict(lambda: 0.0)
 
-        # Queue keys for message handling
-        self._diff_messages_queue_key = "diff_messages"
-        self._trade_messages_queue_key = "trade_messages"
-        self._snapshot_messages_queue_key = "snapshot_messages"
+        # Override the default base queue keys
+        self._diff_messages_queue_key = constants.WS_ORDER_SUBSCRIPTION_KEYS[0]
+        self._trade_messages_queue_key = constants.WS_ORDER_SUBSCRIPTION_KEYS[1]
+        self._snapshot_messages_queue_key = "unused_snapshot_queue"
 
     async def _parse_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        order_book_message: OrderBookMessage = await CoinbaseExchangeOrderBook.level2_or_trade_message_from_exchange(
+        order_book_message: OrderBookMessage = await CoinbaseAdvancedTradeOrderBook.level2_or_trade_message_from_exchange(
             raw_message,
             self._connector.exchange_symbol_associated_to_pair)
         await message_queue.put(order_book_message)
@@ -93,8 +95,8 @@ class CoinbaseExchangeAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     async def listen_for_order_book_snapshots(self, ev_loop: asyncio.AbstractEventLoop, output: asyncio.Queue):
         """
-        Coinbase Exchange provides snapshots through the REST API, not WebSocket.
-        The snapshot is retrieved using the REST API.
+        Coinbase Advanced Trade does not provide snapshots messages.
+        The snapshot is retrieved from the first message of the 'level2' channel.
 
         :param ev_loop: the event loop the method will run in
         :param output: a queue to add the created snapshot messages
@@ -119,16 +121,24 @@ class CoinbaseExchangeAPIOrderBookDataSource(OrderBookTrackerDataSource):
             except Exception:
                 self.logger().exception("Unexpected error when processing public trade updates from exchange")
 
+    def _get_messages_queue_keys(self) -> Tuple[str, ...]:
+        return tuple(constants.WS_ORDER_SUBSCRIPTION_KEYS)
+
+    def _channel_originating_message(self, event_message: Dict[str, Any]) -> str:
+        if event_message and "channel" in event_message and event_message["channel"]:
+            return constants.WS_ORDER_SUBSCRIPTION_CHANNELS.inverse[event_message["channel"]]
+
+    # Implemented methods
     async def _connected_websocket_assistant(self) -> WSAssistant:
         self._ws_assistant: WSAssistant = await self._api_factory.get_ws_assistant()
-        await self._ws_assistant.connect(ws_url="wss://ws-feed.exchange.coinbase.com")
+        await self._ws_assistant.connect(ws_url=constants.WSS_URL.format(domain=self._domain))
         return self._ws_assistant
 
     async def _subscribe_channels(self, ws: WSAssistant):
         """
         Subscribes to the order book events through the provided websocket connection.
         :param ws: the websocket assistant used to connect to the exchange
-        https://docs.cloud.coinbase.com/exchange/docs/websocket-overview
+        https://docs.cloud.coinbase.com/advanced-trade-api/docs/ws-best-practices
 
         Recommended to use several subscriptions
         {
@@ -137,7 +147,12 @@ class CoinbaseExchangeAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 "ETH-USD",
                 "BTC-USD"
             ],
-            "channels": ["level2", "heartbeat"]
+            "channel": "level2",
+
+            # Complemented by the WSAssistant
+            "signature": "XYZ",
+            "api_key": "XXX",
+            "timestamp": 1675974199
         }
         """
         try:
@@ -146,12 +161,13 @@ class CoinbaseExchangeAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
                 symbols.append(symbol)
 
-            payload = {
-                "type": "subscribe",
-                "product_ids": symbols,
-                "channels": ["level2", "heartbeat", {"name": "ticker", "product_ids": symbols}]
-            }
-            await ws.send(WSJSONRequest(payload=payload, is_auth_required=False))
+            for channel in ["heartbeats", *constants.WS_ORDER_SUBSCRIPTION_CHANNELS]:
+                payload = {
+                    "type": "subscribe",
+                    "product_ids": symbols,
+                    "channel": channel,
+                }
+                await ws.send(WSJSONRequest(payload=payload, is_auth_required=True))
 
             self.logger().info(f"Subscribed to order book channels for: {', '.join(self._trading_pairs)}")
         except asyncio.CancelledError:
@@ -167,26 +183,22 @@ class CoinbaseExchangeAPIOrderBookDataSource(OrderBookTrackerDataSource):
         async for ws_response in websocket_assistant.iter_messages():
             data: Dict[str, Any] = ws_response.data
 
-            if data["type"] == 'error':
+            if data and "type" in data and data["type"] == 'error':
                 self.logger().error(f"Error received from websocket: {ws_response}")
                 raise ValueError(f"Error received from websocket: {ws_response}")
 
-            if data["type"] == "subscriptions":
-                self.logger().debug(f"Subscribed to channels: {data}")
-                continue
+            if data is not None and "channel" in data:  # data will be None when the websocket is disconnected
+                if data["channel"] in constants.WS_ORDER_SUBSCRIPTION_CHANNELS.inverse:
+                    queue_key: str = constants.WS_ORDER_SUBSCRIPTION_CHANNELS.inverse[data["channel"]]
+                    await self._message_queue[queue_key].put(data)
 
-            if data["type"] == "heartbeat":
-                self.logger().debug(f"Received heartbeat: {data}")
-                continue
-
-            if data["type"] == "match":  # Trade message
-                await self._parse_message(raw_message=data, message_queue=self._message_queue[self._trade_messages_queue_key])
-
-            elif data["type"] == "l2update":  # Order book diff message
-                await self._parse_message(raw_message=data, message_queue=self._message_queue[self._diff_messages_queue_key])
-
+                elif data["channel"] in ["subscriptions", "heartbeats"]:
+                    self.logger().debug(f"Ignoring message from Coinbase Advanced Trade: {data}")
+                else:
+                    self.logger().debug(
+                        f"Unrecognized websocket message received from Coinbase Advanced Trade: {data['channel']}")
             else:
-                self.logger().warning(f"Unrecognized websocket message type: {data['type']}")
+                self.logger().warning(f"Unrecognized websocket message received from Coinbase Advanced Trade: {data}")
 
     async def _order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
         params = {
@@ -195,33 +207,29 @@ class CoinbaseExchangeAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
         rest_assistant = await self._api_factory.get_rest_assistant()
         snapshot: Dict[str, Any] = await rest_assistant.execute_request(
-            url=f"https://api.exchange.coinbase.com/products/{params['product_id']}/book",
-            params={"level": 2},
+            url=web_utils.public_rest_url(path_url=constants.SNAPSHOT_EP, domain=self._domain),
+            params=params,
             method=RESTMethod.GET,
-            is_auth_required=False,
+            is_auth_required=True,
+            throttler_limit_id=constants.SNAPSHOT_EP,
         )
 
         snapshot_timestamp: float = self._connector.time_synchronizer.time()
 
-        snapshot_msg: OrderBookMessage = CoinbaseExchangeOrderBook.snapshot_message_from_exchange(
+        snapshot_msg: OrderBookMessage = CoinbaseAdvancedTradeOrderBook.snapshot_message_from_exchange(
             snapshot,
             snapshot_timestamp,
             metadata={"trading_pair": trading_pair}
         )
         return snapshot_msg
 
-    # Unused methods for Coinbase Exchange
+    # --- Implementation of abstract methods from the Base class ---
+    # Unused methods
     async def _parse_order_book_trade_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        raise NotImplementedError("Coinbase Exchange does not implement this method.")
+        raise NotImplementedError("Coinbase Advanced Trade does not implement this method.")
 
     async def _parse_order_book_diff_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        raise NotImplementedError("Coinbase Exchange does not implement this method.")
+        raise NotImplementedError("Coinbase Advanced Trade does not implement this method.")
 
     async def _parse_order_book_snapshot_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        raise NotImplementedError("Coinbase Exchange does not implement this method.")
-
-    # You can subscribe to both endpoints, but if ws-direct is your primary connection, we recommend using ws-feed as a failover.
-
-    # Coinbase Market Data production = wss://ws-feed.exchange.coinbase.com / sandbox = wss://ws-feed-public.sandbox.exchange.coinbase.com
-
-    # Coinbase Direct Market Data production = wss://ws-direct.exchange.coinbase.com / sandbox = wss://ws-direct.sandbox.exchange.coinbase.com
+        raise NotImplementedError("Coinbase Advanced Trade does not implement this method.")
