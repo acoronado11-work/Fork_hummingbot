@@ -22,9 +22,9 @@ MAX_ORDER_ID_LEN = 32
 HBOT_BROKER_ID = "Hummingbot"
 
 # Base URL
-SIGNIN_URL = "https://api.coinbase.{domain}/v2"
-REST_URL = "https://api.coinbase.{domain}/api/v3"
-WSS_URL = "wss://advanced-trade-ws.coinbase.{domain}"
+# SIGNIN_URL = "https://api.coinbase.{domain}/v2"
+REST_URL = "https://api.exchange.coinbase.{domain}"
+WSS_URL = "wss://ws-feed.exchange.coinbase.{domain}"
 
 # Coinbase Signin API endpoints
 EXCHANGE_RATES_USD_EP = "/exchange-rates"
@@ -42,22 +42,22 @@ SIGNIN_ENDPOINTS = {
 
 # Private API endpoints
 SERVER_TIME_EP = "/brokerage/time"
-ALL_PAIRS_EP = "/brokerage/products"
-PAIR_TICKER_EP = "/brokerage/products/{product_id}"
+ALL_PAIRS_EP = "/currencies"
+PAIR_TICKER_EP = "/products/{product_id}/ticker'"
 PAIR_TICKER_RATE_LIMIT_ID = "PairTicker"
-PAIR_TICKER_24HR_EP = "/brokerage/products/{product_id}/ticker"
+PAIR_TICKER_24HR_EP = "/products/{product_id}/ticker'"
 PAIR_TICKER_24HR_RATE_LIMIT_ID = "PairTicker24Hr"
-ORDER_EP = "/brokerage/orders"
-BATCH_CANCEL_EP = "/brokerage/orders/batch_cancel"
-GET_ORDER_STATUS_EP = "/brokerage/orders/historical/{order_id}"
+ORDER_EP = "/orders"
+BATCH_CANCEL_EP = "/orders"
+GET_ORDER_STATUS_EP = "orders/{order_id}"
 GET_ORDER_STATUS_RATE_LIMIT_ID = "GetOrderStatus"
-GET_STATUS_BATCH_EP = "/brokerage/orders/historical/batch"
-FILLS_EP = "/brokerage/orders/historical/fills"
+GET_STATUS_BATCH_EP = "/orders"
+FILLS_EP = "/fills"
 TRANSACTIONS_SUMMARY_EP = "/brokerage/transaction_summary"
-ACCOUNTS_LIST_EP = "/brokerage/accounts"
-ACCOUNT_EP = "/brokerage/accounts/{account_uuid}"
+ACCOUNTS_LIST_EP = "/accounts"
+ACCOUNT_EP = "/accounts"
 ACCOUNT_RATE_LIMIT_ID = "Account"
-SNAPSHOT_EP = "/brokerage/product_book"
+SNAPSHOT_EP = "/products/:product_id/book"
 
 PRIVATE_REST_ENDPOINTS = {
     ALL_PAIRS_EP,
@@ -107,7 +107,7 @@ PRIVATE_REST_REQUESTS = "PRIVATE_REST_REQUESTS"
 MAX_PRIVATE_REST_REQUESTS_S = 30
 
 PUBLIC_REST_REQUESTS = "PUBLIC_REST_REQUESTS"
-MAX_PUBLIC_REST_REQUESTS_S = 10
+MAX_PUBLIC_REST_REQUESTS_S = 15
 
 SIGNIN_REQUESTS = "SIGNIN_REQUESTS"
 MAX_SIGNIN_REQUESTS_H = 10000
@@ -123,12 +123,12 @@ ONE_DAY = 86400
 
 # Order States
 ORDER_STATE = {
-    "OPEN": OrderState.OPEN,
-    "PENDING": OrderState.PENDING_CREATE,
-    "FILLED": OrderState.FILLED,
-    "CANCELLED": OrderState.CANCELED,
-    "EXPIRED": OrderState.FAILED,
-    "FAILED": OrderState.FAILED,
+    "open": OrderState.OPEN,
+    "pending": OrderState.PENDING_CREATE,
+    "done": OrderState.FILLED,
+    # "CANCELED": OrderState.CANCELED,
+    # "EXPIRED": OrderState.FAILED,
+    "rejected": OrderState.FAILED,
     # Not directly from exchange
     "PARTIALLY_FILLED": OrderState.PARTIALLY_FILLED,
 }
